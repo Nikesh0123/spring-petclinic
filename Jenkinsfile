@@ -37,7 +37,7 @@ pipeline {
             steps {
                 script {
                     build job: 'sonarqube-cleanup', parameters: [
-                        string(name: 'PROJECT_KEY_TO_CLEAN', value: 'spring-petclinic')
+                        string(name: 'PROJECT_KEY_TO_CLEAN', value: 'Petclinic-Pipeline')
                     ]
                 }
             }
