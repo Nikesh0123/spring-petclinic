@@ -33,12 +33,13 @@ pipeline {
             }
         }
 
-        stage('Trigger SonarQube Cleanup') {
-            when {
-                expression { return env.SONARQUBE_TOKEN?.trim() }
-            }
+        stage('Trigger Sonar Report Cleanup') {
             steps {
-                build job: 'sonarqube-cleanup', wait: false
+                script {
+                    build job: 'sonarqube-cleanup', parameters: [
+                        string(name: 'PROJECT_KEY_TO_CLEAN', value: 'spring-petclinic')
+                    ]
+                }
             }
         }
         stage('Build') {
