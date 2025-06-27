@@ -33,6 +33,14 @@ pipeline {
             }
         }
 
+        stage('Trigger SonarQube Cleanup') {
+            when {
+                expression { return env.SONARQUBE_TOKEN?.trim() }
+            }
+            steps {
+                build job: 'sonarqube-cleanup', wait: false
+            }
+        }
         stage('Build') {
             steps {
                 sh "${MAVEN_HOME}/bin/mvn -B clean package -DskipTests -Dcheckstyle.skip=true"
