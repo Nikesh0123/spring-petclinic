@@ -2,115 +2,160 @@ pipeline {
     agent any
 
     environment {
-        SONARQUBE_SERVER = 'SonarQube'
-        MAVEN_HOME = tool 'Maven 3'
-        NEXUS_REPO = 'maven-releases'
-        NEXUS_URL = 'http://13.126.151.4:30001'
-        NEXUS_DOCKER_REPO = 'docker-hosted'
-        NEXUS_DOCKER_REGISTRY = '13.126.151.4:30002'
-        NEXUS_CREDENTIALS_ID = 'nexus-creds'
-        SONAR_PROJECT_KEY = 'spring-petclinic'
+        JAVA_HOME = "/usr/lib/jvm/java-21-amazon-corretto.x86_64"
+        PATH = "${JAVA_HOME}/bin:${env.PATH}"
+        GIT_REPO_URL = 'https://github.com/jenkins-docs/simple-java-maven-app.git'
+        SONAR_URL = 'http://65.2.137.238:30900'
+        SONAR_TOKEN = 'sqa_654ca1dfc374dfbab096f5aa62d3238e39a54ba5'
+        SONAR_CRED_ID = 'sonar'
+        MAX_BUILDS_TO_KEEP = 5
+        NEXUS_URL = 'http://65.2.137.238:30801/repository/sample-releases/'
+        NEXUS_DOCKER_REPO = '65.2.137.238:30002' // Updated to correct HTTP port
+        NEXUS_CREDENTIAL_ID = 'nexus-creds'
     }
 
-    options {
-        skipStagesAfterUnstable()
+    tools {
+        maven 'maven-3.9.10'
     }
 
     stages {
         stage('Checkout') {
-            when {
-                branch 'main'
-            }
             steps {
-                git url: 'https://github.com/yeshcrik/spring-petclinic.git', branch: 'main'
+                git url: "${GIT_REPO_URL}", branch: 'master'
             }
         }
 
-        stage('SonarQube Scan') {
-            steps {
-                withSonarQubeEnv("${SONARQUBE_SERVER}") {
-                    sh "${MAVEN_HOME}/bin/mvn clean verify sonar:sonar -Dcheckstyle.skip=true -Dsonar.projectKey=${SONAR_PROJECT_KEY}"
-                }
-            }
-        }
-
-        stage('Trigger Sonar Report Cleanup') {
+        stage('Create Sonar Project') {
             steps {
                 script {
-                    def cleanup = build job: 'sonarqube-cleanup', parameters: [
-                        string(name: 'PROJECT_KEY_TO_CLEAN', value: "${SONAR_PROJECT_KEY}")
-                    ], wait: true
-
-                    echo "Cleanup job result: ${cleanup.result}"
-                }
-            }
-        }
-
-        stage('Build') {
-            steps {
-                sh "${MAVEN_HOME}/bin/mvn -B clean package -DskipTests -Dcheckstyle.skip=true"
-            }
-        }
-
-        stage('Version Build') {
-            steps {
-                script {
-                    def version = sh(script: "date +%Y%m%d%H%M%S", returnStdout: true).trim()
-                    env.BUILD_VERSION = "1.0.0-${version}"
-                    sh """
-                        cp target/spring-petclinic-3.5.0-SNAPSHOT.jar target/petclinic-${BUILD_VERSION}.jar
-                    """
-                }
-            }
-        }
-
-        // stage('Manual Approval') {
-        //     steps {
-        //         timeout(time: 10, unit: 'MINUTES') {
-        //             input message: "Approve deployment to Nexus?", ok: "Deploy"
-        //         }
-        //     }
-        // }
-
-        stage('Publish to Nexus') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: "${NEXUS_CREDENTIALS_ID}", usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                    sh """
-                        curl -v -u $NEXUS_USER:$NEXUS_PASS \
-                        --upload-file target/petclinic-${BUILD_VERSION}.jar \
-                        $NEXUS_URL/repository/$NEXUS_REPO/com/spring/petclinic/1.0.0/petclinic-${BUILD_VERSION}.jar
-                    """
-                }
-            }
-        }
-
-        stage('Build and Push Docker Image') {
-            steps {
-                script {
-                    def imageName = "petclinic"
-
-                    withCredentials([usernamePassword(credentialsId: "${NEXUS_CREDENTIALS_ID}", usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                    def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replace('/', '-')
+                    withCredentials([usernamePassword(credentialsId: "${SONAR_CRED_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
                         sh """
-                            curl -u $NEXUS_USER:$NEXUS_PASS -O \
-                            $NEXUS_URL/repository/$NEXUS_REPO/com/spring/petclinic/1.0.0/petclinic-${BUILD_VERSION}.jar
-
-                            cp petclinic-${BUILD_VERSION}.jar petclinic.jar
+                        curl -s -o /dev/null -w "%{http_code}" -u $USERNAME:$PASSWORD -X POST \
+                          "${SONAR_URL}/api/projects/create?project=${projectName}&name=${projectName}" || true
                         """
                     }
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replace('/', '-')
+                    sh """
+                    mvn clean verify sonar:sonar \
+                      -Dsonar.projectKey=${projectName} \
+                      -Dsonar.host.url=${SONAR_URL} \
+                      -Dsonar.login=${SONAR_TOKEN}
+                    """
+                }
+            }
+        }
+
+        stage('Build and Tag Artifact') {
+            steps {
+                script {
+                    sh "mvn clean package -DskipTests"
+                    def artifactName = "my-app-${BUILD_NUMBER}.jar"
+                    sh """
+                        mkdir -p tagged-artifacts
+                        cp target/*.jar tagged-artifacts/${artifactName}
+                        echo "Artifact tagged as ${artifactName}"
+                    """
+                }
+            }
+        }
+
+        stage('Push Artifact to Nexus') {
+            steps {
+                script {
+                    def version = "1.0.${BUILD_NUMBER}"
+                    def artifactId = "my-app"
+                    def groupPath = "com/mycompany/app"
+                    def nexusPath = "${groupPath}/${artifactId}/${version}"
+                    def finalArtifact = "${artifactId}-${version}.jar"
 
                     sh """
-                        docker build -t ${NEXUS_DOCKER_REGISTRY}/${imageName}:${BUILD_VERSION} .
+                        mv tagged-artifacts/my-app-${BUILD_NUMBER}.jar tagged-artifacts/${finalArtifact}
                     """
 
-                    withCredentials([usernamePassword(credentialsId: "${NEXUS_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    withCredentials([usernamePassword(credentialsId: "${NEXUS_CREDENTIAL_ID}", usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                         sh """
-                            echo "$DOCKER_PASS" | docker login ${NEXUS_DOCKER_REGISTRY} -u "$DOCKER_USER" --password-stdin
-                            docker push ${NEXUS_DOCKER_REGISTRY}/${imageName}:${BUILD_VERSION}
+                        curl -u $NEXUS_USER:$NEXUS_PASS \
+                             --upload-file tagged-artifacts/${finalArtifact} \
+                             ${NEXUS_URL}${nexusPath}/${finalArtifact}
                         """
+                    }
+                }
+            }
+        }
+
+        stage('Create Dockerfile') {
+            steps {
+                script {
+                    writeFile file: 'Dockerfile', text: """
+                    FROM openjdk:21-jdk-slim
+                    WORKDIR /app
+                    COPY tagged-artifacts/my-app-*.jar app.jar
+                    EXPOSE 8080
+                    ENTRYPOINT ["java", "-jar", "app.jar"]
+                    """
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    def imageTag = "${NEXUS_DOCKER_REPO}/my-app:${BUILD_NUMBER}"
+                    sh "docker build -t ${imageTag} ."
+                }
+            }
+        }
+
+        stage('Push Docker Image to Nexus') {
+            steps {
+                script {
+                    def imageTag = "${NEXUS_DOCKER_REPO}/my-app:${BUILD_NUMBER}"
+                    withCredentials([usernamePassword(credentialsId: "${NEXUS_CREDENTIAL_ID}", usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                        sh """
+                            echo $NEXUS_PASS | docker login http://${NEXUS_DOCKER_REPO} -u $NEXUS_USER --password-stdin
+                            docker push ${imageTag}
+                            docker logout http://${NEXUS_DOCKER_REPO}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Delete Old Sonar Projects') {
+            steps {
+                script {
+                    def currentBuild = env.BUILD_NUMBER.toInteger()
+                    def minBuildToKeep = currentBuild - MAX_BUILDS_TO_KEEP.toInteger()
+
+                    if (minBuildToKeep > 0) {
+                        withCredentials([usernamePassword(credentialsId: "${SONAR_CRED_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                            for (int i = 1; i <= minBuildToKeep; i++) {
+                                def oldProject = "${env.JOB_NAME}-${i}".replace('/', '-')
+                                echo "Deleting old Sonar project: ${oldProject}"
+                                sh """
+                                curl -s -o /dev/null -w "%{http_code}" -u $USERNAME:$PASSWORD -X POST \
+                                  "${SONAR_URL}/api/projects/delete" \
+                                  -d "project=${oldProject}" || true
+                                """
+                            }
+                        }
                     }
                 }
             }
         }
     }
-}
 
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}
