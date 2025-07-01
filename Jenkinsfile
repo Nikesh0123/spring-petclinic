@@ -100,22 +100,43 @@ pipeline {
             }
         }
 
-        stage('Cleanup Old Sonar Reports') {
+        stage('Cleanup Old Sonar Projects') {
             steps {
                 script {
-                    def currentBuildNumber = env.BUILD_NUMBER.toInteger()
-                    def minBuildToKeep = currentBuildNumber - MAX_BUILDS_TO_KEEP.toInteger()
-                    if (minBuildToKeep > 0) {
-                        withCredentials([string(credentialsId: "${SONAR_CRED_ID}", variable: 'SONAR_TOKEN')]) {
-                            for (int i = 1; i < minBuildToKeep; i++) {
-                                def oldProject = "${env.JOB_NAME}-${i}".replace('/', '-')
-                                echo "Deleting old Sonar project: ${oldProject}"
+                    withCredentials([string(credentialsId: "${SONAR_CRED_ID}", variable: 'SONAR_TOKEN')]) {
+                        def projectPrefix = "${env.JOB_NAME}-".replace('/', '-')
+
+                        def projectListRaw = sh(
+                            script: """
+                                curl -s -X GET "${SONAR_URL}/api/projects/search?ps=500" \\
+                                     -H "Authorization: Bearer ${SONAR_TOKEN}"
+                            """,
+                            returnStdout: true
+                        ).trim()
+
+                        def json = readJSON text: projectListRaw
+                        def matchingProjects = json.components.findAll { it.key.startsWith(projectPrefix) }
+
+                        def sortedProjects = matchingProjects.sort { a, b ->
+                            def numA = a.key.replace(projectPrefix, '') =~ /\\d+/
+                            def numB = b.key.replace(projectPrefix, '') =~ /\\d+/
+                            (numA ? numA[0].toInteger() : 0) <=> (numB ? numB[0].toInteger() : 0)
+                        }
+
+                        echo "Total matching Sonar projects: ${sortedProjects.size()}"
+
+                        def toDelete = sortedProjects.dropRight(MAX_BUILDS_TO_KEEP.toInteger())
+                        if (toDelete.size() > 0) {
+                            toDelete.each { project ->
+                                echo "Deleting old Sonar project: ${project.key}"
                                 sh """
                                     curl -s -X POST "${SONAR_URL}/api/projects/delete" \\
                                          -H "Authorization: Bearer ${SONAR_TOKEN}" \\
-                                         -d "project=${oldProject}" || true
+                                         -d "project=${project.key}" || true
                                 """
                             }
+                        } else {
+                            echo "No old projects to delete. All within limit."
                         }
                     }
                 }
