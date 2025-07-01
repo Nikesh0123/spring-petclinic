@@ -7,7 +7,7 @@ pipeline {
         GIT_REPO_URL = 'https://github.com/yeshcrik/spring-petclinic.git'
         SONAR_URL = 'http://13.126.151.4:30000'
         SONAR_TOKEN = 'squ_07e73371bad50dd642ed679d52e250462a92eece'
-        SONAR_CRED_ID = 'sonar-userpass'
+        SONAR_CRED_ID = 'sonar-token'
         MAX_BUILDS_TO_KEEP = 5
         NEXUS_URL = 'http://13.126.151.4:30001/#browse/browse:maven-releases'
         NEXUS_DOCKER_REPO = '13.126.151.4:30002' // Updated to correct HTTP port
