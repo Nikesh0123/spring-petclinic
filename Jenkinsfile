@@ -6,11 +6,10 @@ pipeline {
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
         GIT_REPO_URL = 'https://github.com/yeshcrik/spring-petclinic.git'
         SONAR_URL = 'http://13.126.151.4:30000'
-        SONAR_TOKEN = 'squ_07e73371bad50dd642ed679d52e250462a92eece'
-        SONAR_CRED_ID = 'sonar-token'
+        SONAR_CRED_ID = 'sonar-token'  // Jenkins Secret Text credential
         MAX_BUILDS_TO_KEEP = 5
         NEXUS_URL = 'http://13.126.151.4:30001/#browse/browse:maven-releases'
-        NEXUS_DOCKER_REPO = '13.126.151.4:30002' // Updated to correct HTTP port
+        NEXUS_DOCKER_REPO = '13.126.151.4:30002'
         NEXUS_CREDENTIAL_ID = 'nexus-creds'
     }
 
@@ -29,7 +28,7 @@ pipeline {
             steps {
                 script {
                     def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replace('/', '-')
-                    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                    withCredentials([string(credentialsId: "${SONAR_CRED_ID}", variable: 'SONAR_TOKEN')]) {
                         sh '''
                         curl -s -o /dev/null -w %{http_code} \
                           -X POST "$SONAR_URL/api/projects/create?project=petclinic_ci-8&name=petclinic_ci-8" \
@@ -44,12 +43,14 @@ pipeline {
             steps {
                 script {
                     def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replace('/', '-')
-                    sh """
-                    mvn clean verify -Dcheckstyle.skip=true sonar:sonar \
-                      -Dsonar.projectKey=${projectName} \
-                      -Dsonar.host.url=${SONAR_URL} \
-                      -Dsonar.login=${SONAR_TOKEN}
-                    """
+                    withCredentials([string(credentialsId: "${SONAR_CRED_ID}", variable: 'SONAR_TOKEN')]) {
+                        sh """
+                        mvn clean verify -Dcheckstyle.skip=true sonar:sonar \\
+                          -Dsonar.projectKey=${projectName} \\
+                          -Dsonar.host.url=${SONAR_URL} \\
+                          -Dsonar.login=${SONAR_TOKEN}
+                        """
+                    }
                 }
             }
         }
@@ -83,8 +84,8 @@ pipeline {
 
                     withCredentials([usernamePassword(credentialsId: "${NEXUS_CREDENTIAL_ID}", usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                         sh """
-                        curl -u $NEXUS_USER:$NEXUS_PASS \
-                             --upload-file tagged-artifacts/${finalArtifact} \
+                        curl -u $NEXUS_USER:$NEXUS_PASS \\
+                             --upload-file tagged-artifacts/${finalArtifact} \\
                              ${NEXUS_URL}${nexusPath}/${finalArtifact}
                         """
                     }
@@ -123,13 +124,14 @@ pipeline {
                     def minBuildToKeep = currentBuild - MAX_BUILDS_TO_KEEP.toInteger()
 
                     if (minBuildToKeep > 0) {
-                        withCredentials([usernamePassword(credentialsId: "${SONAR_CRED_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                        withCredentials([string(credentialsId: "${SONAR_CRED_ID}", variable: 'SONAR_TOKEN')]) {
                             for (int i = 1; i <= minBuildToKeep; i++) {
                                 def oldProject = "${env.JOB_NAME}-${i}".replace('/', '-')
                                 echo "Deleting old Sonar project: ${oldProject}"
                                 sh """
-                                curl -s -o /dev/null -w "%{http_code}" -u $USERNAME:$PASSWORD -X POST \
-                                  "${SONAR_URL}/api/projects/delete" \
+                                curl -s -o /dev/null -w "%{http_code}" -X POST \\
+                                  "${SONAR_URL}/api/projects/delete" \\
+                                  -H "Authorization: Bearer ${SONAR_TOKEN}" \\
                                   -d "project=${oldProject}" || true
                                 """
                             }
@@ -146,5 +148,3 @@ pipeline {
         }
     }
 }
-
-
