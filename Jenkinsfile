@@ -125,6 +125,11 @@ pipeline {
                             curl -u $USERNAME:$PASSWORD -s '${SONAR_URL}/api/projects/search?q=${projectPrefix}'
                         """, returnStdout: true).trim()
 
+                        if (!json || json == "{}") {
+                            echo "No JSON data received from SonarQube API."
+                            return
+                        }
+
                         def projectKeys = readJSON text: json
                         def matchedProjects = projectKeys.components.findAll {
                             it.key.startsWith(projectPrefix)
