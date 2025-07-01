@@ -10,7 +10,7 @@ pipeline {
         SONAR_CRED_ID = 'sonar-userpass'
         MAX_BUILDS_TO_KEEP = 5
         NEXUS_URL = 'http://13.126.151.4:30001/#browse/browse:maven-releases'
-        NEXUS_DOCKER_REPO = '13.126.151.4:30002' // Updated to correct HTTP port
+        NEXUS_DOCKER_REPO = '13.126.151.4:30002'
         NEXUS_CREDENTIAL_ID = 'nexus-creds'
     }
 
@@ -119,20 +119,32 @@ pipeline {
         stage('Delete Old Sonar Projects') {
             steps {
                 script {
-                    def currentBuild = env.BUILD_NUMBER.toInteger()
-                    def minBuildToKeep = currentBuild - MAX_BUILDS_TO_KEEP.toInteger()
+                    def projectPrefix = "${env.JOB_NAME}-".replace('/', '-')
+                    withCredentials([usernamePassword(credentialsId: "${SONAR_CRED_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                        def json = sh(script: """
+                            curl -u $USERNAME:$PASSWORD -s '${SONAR_URL}/api/projects/search?q=${projectPrefix}'
+                        """, returnStdout: true).trim()
 
-                    if (minBuildToKeep > 0) {
-                        withCredentials([usernamePassword(credentialsId: "${SONAR_CRED_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
-                            for (int i = 1; i <= minBuildToKeep; i++) {
-                                def oldProject = "${env.JOB_NAME}-${i}".replace('/', '-')
-                                echo "Deleting old Sonar project: ${oldProject}"
+                        def projectKeys = readJSON text: json
+                        def matchedProjects = projectKeys.components.findAll {
+                            it.key.startsWith(projectPrefix)
+                        }.sort { a, b ->
+                            def aNum = a.key.replace(projectPrefix, '').toInteger()
+                            def bNum = b.key.replace(projectPrefix, '').toInteger()
+                            bNum <=> aNum
+                        }
+
+                        if (matchedProjects.size() > MAX_BUILDS_TO_KEEP.toInteger()) {
+                            def toDelete = matchedProjects.drop(MAX_BUILDS_TO_KEEP.toInteger())
+                            toDelete.each { proj ->
+                                echo "Deleting old Sonar project: ${proj.key}"
                                 sh """
-                                curl -s -o /dev/null -w "%{http_code}" -u $USERNAME:$PASSWORD -X POST \
-                                  "${SONAR_URL}/api/projects/delete" \
-                                  -d "project=${oldProject}" || true
+                                    curl -u $USERNAME:$PASSWORD -X POST "${SONAR_URL}/api/projects/delete" \
+                                        -d "project=${proj.key}" || true
                                 """
                             }
+                        } else {
+                            echo "No old SonarQube projects to delete."
                         }
                     }
                 }
@@ -146,4 +158,3 @@ pipeline {
         }
     }
 }
-
