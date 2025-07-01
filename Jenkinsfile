@@ -28,6 +28,8 @@ pipeline {
             steps {
                 script {
                     def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replaceAll('/', '-')
+                    echo "Sonar project key generated: ${projectName}"
+
                     withCredentials([string(credentialsId: SONAR_CRED_ID, variable: 'SONAR_TOKEN')]) {
                         sh """
                           mvn clean verify -Dcheckstyle.skip=true sonar:sonar \\
@@ -132,34 +134,36 @@ pipeline {
                         }
 
                         if (!data?.components) {
-                            echo "⚠️ Could not find project list. Skipping cleanup."
+                            echo "⚠️ No components found in Sonar response. Skipping cleanup."
                             return
                         }
 
                         def ours = data.components.findAll { it.key.startsWith(prefix) }
-                        def sorted = ours.sort { a, b ->
-                            def aNum = (a.key - prefix) =~ /\d+/
-                            def bNum = (b.key - prefix) =~ /\d+/
-                            (aNum ? aNum[0].toInteger() : 0) <=> (bNum ? bNum[0].toInteger() : 0)
+
+                        def extractBuildNumber = { key ->
+                            def match = key =~ /(\d+)$/
+                            return match ? match[0][1].toInteger() : 0
                         }
 
-                        echo "Found ${sorted.size()} total builds in Sonar for this job."
+                        def sorted = ours.sort { a, b ->
+                            extractBuildNumber(a.key) <=> extractBuildNumber(b.key)
+                        }
 
+                        echo "Found ${sorted.size()} Sonar projects for this job."
                         def toDelete = sorted.size() > MAX_BUILDS_TO_KEEP.toInteger()
                             ? sorted.dropRight(MAX_BUILDS_TO_KEEP.toInteger())
                             : []
 
-                        if (toDelete) {
-                            toDelete.each { prj ->
-                                echo "Deleting Sonar project: ${prj.key}"
-                                sh """
-                                    curl -s -X POST "${SONAR_URL}/api/projects/delete" \\
-                                    -H "Authorization: Bearer \$SONAR_TOKEN" \\
-                                    -d "project=${prj.key}" || true
-                                """
-                            }
-                        } else {
-                            echo "No old projects to delete; keeping latest ${MAX_BUILDS_TO_KEEP}."
+                        echo "Projects to delete:"
+                        toDelete.each { echo it.key }
+
+                        toDelete.each { prj ->
+                            echo "Deleting Sonar project: ${prj.key}"
+                            sh """
+                                curl -s -X POST "${SONAR_URL}/api/projects/delete" \\
+                                  -H "Authorization: Bearer \$SONAR_TOKEN" \\
+                                  -d "project=${prj.key}" || true
+                            """
                         }
                     }
                 }
