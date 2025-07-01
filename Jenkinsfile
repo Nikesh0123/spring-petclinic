@@ -27,9 +27,7 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 script {
-                    def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replaceAll('/', '-')
-                    echo "Sonar project key generated: ${projectName}"
-
+                    def projectName = "petclinic_ci-${env.BUILD_NUMBER}"
                     withCredentials([string(credentialsId: SONAR_CRED_ID, variable: 'SONAR_TOKEN')]) {
                         sh """
                           mvn clean verify -Dcheckstyle.skip=true sonar:sonar \\
@@ -111,7 +109,7 @@ pipeline {
             steps {
                 script {
                     withCredentials([string(credentialsId: SONAR_CRED_ID, variable: 'SONAR_TOKEN')]) {
-                        def prefix = "${env.JOB_NAME}-".replaceAll('/', '-')
+                        def prefix = "petclinic_ci-"
                         def raw = sh(
                             script: """
                                 curl -s -X GET "${SONAR_URL}/api/projects/search?ps=500" \\
@@ -121,49 +119,44 @@ pipeline {
                         ).trim()
 
                         if (!raw || !raw.startsWith('{')) {
-                            echo "⚠️ SonarQube API did not return valid JSON. Skipping cleanup."
+                            echo "⚠️ Invalid JSON returned from SonarQube."
                             return
                         }
 
                         def data
                         try {
                             data = readJSON text: raw
-                        } catch (Exception e) {
-                            echo "⚠️ Failed to parse SonarQube API response: ${e.message}"
+                        } catch (e) {
+                            echo "⚠️ Failed to parse Sonar JSON: ${e.message}"
                             return
                         }
 
-                        if (!data?.components) {
-                            echo "⚠️ No components found in Sonar response. Skipping cleanup."
-                            return
+                        def all = data?.components ?: []
+                        def ours = all.findAll { it.key.startsWith(prefix) }
+
+                        def extractBuild = { k -> 
+                            def num = (k - prefix)
+                            return num.isInteger() ? num.toInteger() : 0
                         }
+                        def sorted = ours.sort { a, b -> extractBuild(a.key) <=> extractBuild(b.key) }
 
-                        def ours = data.components.findAll { it.key.startsWith(prefix) }
+                        echo "Total Sonar projects with prefix '${prefix}': ${sorted.size()}"
 
-                        def extractBuildNumber = { key ->
-                            def match = key =~ /(\d+)$/
-                            return match ? match[0][1].toInteger() : 0
-                        }
-
-                        def sorted = ours.sort { a, b ->
-                            extractBuildNumber(a.key) <=> extractBuildNumber(b.key)
-                        }
-
-                        echo "Found ${sorted.size()} Sonar projects for this job."
                         def toDelete = sorted.size() > MAX_BUILDS_TO_KEEP.toInteger()
                             ? sorted.dropRight(MAX_BUILDS_TO_KEEP.toInteger())
                             : []
 
-                        echo "Projects to delete:"
-                        toDelete.each { echo it.key }
-
                         toDelete.each { prj ->
-                            echo "Deleting Sonar project: ${prj.key}"
+                            echo "❌ Deleting Sonar project: ${prj.key}"
                             sh """
                                 curl -s -X POST "${SONAR_URL}/api/projects/delete" \\
                                   -H "Authorization: Bearer \$SONAR_TOKEN" \\
                                   -d "project=${prj.key}" || true
                             """
+                        }
+
+                        if (toDelete.isEmpty()) {
+                            echo "✅ No old Sonar projects to delete."
                         }
                     }
                 }
