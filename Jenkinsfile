@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        JAVA_HOME = "/usr/lib/jvm/java-21-amazon-corretto.x86_64"
+        JAVA_HOME = "/usr/lib/jvm/java-17-openjdk-amd64"
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
         GIT_REPO_URL = 'https://github.com/yeshcrik/spring-petclinic.git'
         SONAR_URL = 'http://13.126.151.4:30000'
@@ -29,11 +29,12 @@ pipeline {
             steps {
                 script {
                     def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replace('/', '-')
-                    withCredentials([usernamePassword(credentialsId: "${SONAR_CRED_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
-                        sh """
-                        curl -s -o /dev/null -w "%{http_code}" -u $USERNAME:$PASSWORD -X POST \
-                          "${SONAR_URL}/api/projects/create?project=${projectName}&name=${projectName}" || true
-                        """
+                    withCredentials([string(credentialsId: 'sonar', variable: 'SONAR_TOKEN')]) {
+                        sh '''
+                        curl -s -o /dev/null -w %{http_code} \
+                          -X POST "$SONAR_URL/api/projects/create?project=petclinic_ci-8&name=petclinic_ci-8" \
+                          -H "Authorization: Bearer $SONAR_TOKEN"
+                        '''
                     }
                 }
             }
