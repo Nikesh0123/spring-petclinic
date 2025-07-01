@@ -5,7 +5,7 @@ pipeline {
         JAVA_HOME            = "/usr/lib/jvm/java-17-openjdk-amd64"
         PATH                 = "${JAVA_HOME}/bin:${env.PATH}"
         GIT_REPO_URL         = 'https://github.com/yeshcrik/spring-petclinic.git'
-        SONAR_URL            = 'http://13.232.196.156:30000/'
+        SONAR_URL            = 'http://13.232.196.156:30000'
         SONAR_CRED_ID        = 'sonar-token'
         MAX_BUILDS_TO_KEEP   = 5
         NEXUS_URL            = 'http://13.126.151.4:30001/repository/maven-releases'
@@ -113,50 +113,53 @@ pipeline {
                         def raw = sh(
                             script: """
                                 curl -s -X GET "${SONAR_URL}/api/projects/search?ps=500" \\
-                                -H "Authorization: Bearer \$SONAR_TOKEN"
+                                  -H "Authorization: Bearer \$SONAR_TOKEN"
                             """,
                             returnStdout: true
                         ).trim()
 
                         if (!raw || !raw.startsWith('{')) {
-                            echo "⚠️ Invalid JSON returned from SonarQube."
+                            echo "❌ Invalid SonarQube JSON response:\n${raw}"
                             return
                         }
 
-                        def data
+                        def json
                         try {
-                            data = readJSON text: raw
+                            json = readJSON text: raw
                         } catch (e) {
-                            echo "⚠️ Failed to parse Sonar JSON: ${e.message}"
+                            echo "❌ Failed to parse Sonar JSON: ${e.message}"
                             return
                         }
 
-                        def all = data?.components ?: []
-                        def ours = all.findAll { it.key.startsWith(prefix) }
+                        def components = json.components ?: []
+                        def filtered = components.findAll { it.key.startsWith(prefix) }
 
-                        def extractBuild = { k -> 
-                            def num = (k - prefix)
-                            return num.isInteger() ? num.toInteger() : 0
+                        echo "🔍 Found ${filtered.size()} matching SonarQube projects: ${filtered*.key}"
+
+                        def extractBuildNum = { key ->
+                            def match = key =~ /${prefix}(\\d+)/
+                            return match ? match[0][1].toInteger() : 0
                         }
-                        def sorted = ours.sort { a, b -> extractBuild(a.key) <=> extractBuild(b.key) }
 
-                        echo "Total Sonar projects with prefix '${prefix}': ${sorted.size()}"
+                        def sorted = filtered.sort { a, b ->
+                            extractBuildNum(a.key) <=> extractBuildNum(b.key)
+                        }
 
                         def toDelete = sorted.size() > MAX_BUILDS_TO_KEEP.toInteger()
                             ? sorted.dropRight(MAX_BUILDS_TO_KEEP.toInteger())
                             : []
 
-                        toDelete.each { prj ->
-                            echo "❌ Deleting Sonar project: ${prj.key}"
-                            sh """
-                                curl -s -X POST "${SONAR_URL}/api/projects/delete" \\
-                                  -H "Authorization: Bearer \$SONAR_TOKEN" \\
-                                  -d "project=${prj.key}" || true
-                            """
-                        }
-
-                        if (toDelete.isEmpty()) {
-                            echo "✅ No old Sonar projects to delete."
+                        if (toDelete) {
+                            echo "🧹 Deleting ${toDelete.size()} old projects: ${toDelete*.key}"
+                            toDelete.each { prj ->
+                                sh """
+                                    curl -s -X POST "${SONAR_URL}/api/projects/delete" \\
+                                        -H "Authorization: Bearer \$SONAR_TOKEN" \\
+                                        -d "project=${prj.key}" || echo "⚠️ Failed to delete ${prj.key}"
+                                """
+                            }
+                        } else {
+                            echo "✅ No projects to delete. Latest ${MAX_BUILDS_TO_KEEP} retained."
                         }
                     }
                 }
