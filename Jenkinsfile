@@ -91,20 +91,6 @@ pipeline {
             }
         }
 
-        stage('Create Dockerfile') {
-            steps {
-                script {
-                    writeFile file: 'Dockerfile', text: """
-                    FROM openjdk:21-jdk-slim
-                    WORKDIR /app
-                    COPY tagged-artifacts/my-app-*.jar app.jar
-                    EXPOSE 8080
-                    ENTRYPOINT ["java", "-jar", "app.jar"]
-                    """
-                }
-            }
-        }
-
         stage('Build Docker Image') {
             steps {
                 script {
