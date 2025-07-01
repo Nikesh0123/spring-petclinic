@@ -8,7 +8,7 @@ pipeline {
         SONAR_URL = 'http://13.126.151.4:30000'
         SONAR_CRED_ID = 'sonar-userpass'
         MAX_BUILDS_TO_KEEP = 5
-        NEXUS_URL = 'http://13.126.151.4:30001/#browse/browse:maven-releases'
+        NEXUS_URL = 'http://13.126.151.4:30001/repository/maven-releases'
         NEXUS_DOCKER_REPO = '13.126.151.4:30002'
         NEXUS_CREDENTIAL_ID = 'nexus-creds'
     }
@@ -18,6 +18,7 @@ pipeline {
     }
 
     stages {
+
         stage('Checkout') {
             steps {
                 git url: "${GIT_REPO_URL}", branch: 'main'
@@ -29,11 +30,19 @@ pipeline {
                 script {
                     def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replace('/', '-')
                     withCredentials([string(credentialsId: 'sonar', variable: 'SONAR_TOKEN')]) {
-                        sh '''
-                        curl -s -o /dev/null -w %{http_code} \
-                          -X POST "$SONAR_URL/api/projects/create?project=petclinic_ci-8&name=petclinic_ci-8" \
-                          -H "Authorization: Bearer $SONAR_TOKEN"
-                        '''
+                        def responseCode = sh(
+                            script: """
+                                curl -s -o /dev/null -w "%{http_code}" -X POST \
+                                "${SONAR_URL}/api/projects/create?project=${projectName}&name=${projectName}" \
+                                -H "Authorization: Bearer ${SONAR_TOKEN}"
+                            """,
+                            returnStdout: true
+                        ).trim()
+
+                        echo "SonarQube project creation response: ${responseCode}"
+                        if (responseCode != '200' && responseCode != '204') {
+                            error("Failed to create SonarQube project.")
+                        }
                     }
                 }
             }
@@ -43,12 +52,14 @@ pipeline {
             steps {
                 script {
                     def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replace('/', '-')
-                    sh """
-                    mvn clean verify -Dcheckstyle.skip=true sonar:sonar \
-                      -Dsonar.projectKey=${projectName} \
-                      -Dsonar.host.url=${SONAR_URL} \
-                      -Dsonar.login=${SONAR_TOKEN}
-                    """
+                    withCredentials([string(credentialsId: 'sonar', variable: 'SONAR_TOKEN')]) {
+                        sh """
+                            mvn clean verify -Dcheckstyle.skip=true sonar:sonar \
+                              -Dsonar.projectKey=${projectName} \
+                              -Dsonar.host.url=${SONAR_URL} \
+                              -Dsonar.login=${SONAR_TOKEN}
+                        """
+                    }
                 }
             }
         }
@@ -82,9 +93,9 @@ pipeline {
 
                     withCredentials([usernamePassword(credentialsId: "${NEXUS_CREDENTIAL_ID}", usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                         sh """
-                        curl -u $NEXUS_USER:$NEXUS_PASS \
-                             --upload-file tagged-artifacts/${finalArtifact} \
-                             ${NEXUS_URL}${nexusPath}/${finalArtifact}
+                            curl -u $NEXUS_USER:$NEXUS_PASS \
+                                 --upload-file tagged-artifacts/${finalArtifact} \
+                                 ${NEXUS_URL}/${nexusPath}/${finalArtifact}
                         """
                     }
                 }
@@ -144,7 +155,7 @@ pipeline {
                                 echo "Deleting old Sonar project: ${proj.key}"
                                 sh """
                                     curl -u $USERNAME:$PASSWORD -X POST "${SONAR_URL}/api/projects/delete" \
-                                        -d "project=${proj.key}" || true
+                                         -d "project=${proj.key}" || true
                                 """
                             }
                         } else {
@@ -162,3 +173,4 @@ pipeline {
         }
     }
 }
+
