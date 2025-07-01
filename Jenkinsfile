@@ -28,7 +28,7 @@ pipeline {
             steps {
                 script {
                     def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replace('/', '-')
-                    withCredentials([string(credentialsId: 'sonar', variable: 'SONAR_TOKEN')]) {
+                    withCredentials([string(credentialsId: 'sonar', variable: 'SONAR_CRED_ID')]) {
                         sh '''
                         curl -s -o /dev/null -w %{http_code} \
                           -X POST "$SONAR_URL/api/projects/create?project=petclinic_ci-8&name=petclinic_ci-8" \
