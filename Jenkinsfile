@@ -29,7 +29,7 @@ pipeline {
             steps {
                 script {
                     def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replace('/', '-')
-                    withCredentials([string(credentialsId: 'sonar', variable: 'SONAR_TOKEN')]) {
+                    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                         def responseCode = sh(
                             script: """
                                 curl -s -o /dev/null -w "%{http_code}" -X POST \
