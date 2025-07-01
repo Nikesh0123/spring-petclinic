@@ -6,7 +6,6 @@ pipeline {
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
         GIT_REPO_URL = 'https://github.com/yeshcrik/spring-petclinic.git'
         SONAR_URL = 'http://13.126.151.4:30000'
-        SONAR_TOKEN = 'squ_07e73371bad50dd642ed679d52e250462a92eece'
         SONAR_CRED_ID = 'sonar-userpass'
         MAX_BUILDS_TO_KEEP = 5
         NEXUS_URL = 'http://13.126.151.4:30001/#browse/browse:maven-releases'
