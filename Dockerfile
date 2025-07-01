@@ -1,4 +1,5 @@
-FROM openjdk:17-jdk-alpine
-COPY petclinic.jar /app/petclinic.jar
+FROM openjdk:21-jdk-slim
 WORKDIR /app
-ENTRYPOINT ["java", "-jar", "petclinic.jar"]
+COPY tagged-artifacts/my-app-*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar]
