@@ -105,61 +105,23 @@ pipeline {
             }
         }
 
-        stage('Cleanup Old Sonar Projects') {
+        stage('Delete Old Sonar Projects') {
             steps {
                 script {
-                    withCredentials([string(credentialsId: SONAR_CRED_ID, variable: 'SONAR_TOKEN')]) {
-                        def prefix = "petclinic_ci-"
-                        def raw = sh(
-                            script: """
-                                curl -s -X GET "${SONAR_URL}/api/projects/search?ps=500" \\
-                                  -H "Authorization: Bearer \$SONAR_TOKEN"
-                            """,
-                            returnStdout: true
-                        ).trim()
+                    def currentBuild = env.BUILD_NUMBER.toInteger()
+                    def minBuildToKeep = currentBuild - MAX_BUILDS_TO_KEEP.toInteger()
 
-                        if (!raw || !raw.startsWith('{')) {
-                            echo "❌ Invalid SonarQube JSON response:\n${raw}"
-                            return
-                        }
-
-                        def json
-                        try {
-                            json = readJSON text: raw
-                        } catch (e) {
-                            echo "❌ Failed to parse Sonar JSON: ${e.message}"
-                            return
-                        }
-
-                        def components = json.components ?: []
-                        def filtered = components.findAll { it.key.startsWith(prefix) }
-
-                        echo "🔍 Found ${filtered.size()} matching SonarQube projects: ${filtered*.key}"
-
-                        def extractBuildNum = { key ->
-                            def match = key =~ /${prefix}(\\d+)/
-                            return match ? match[0][1].toInteger() : 0
-                        }
-
-                        def sorted = filtered.sort { a, b ->
-                            extractBuildNum(a.key) <=> extractBuildNum(b.key)
-                        }
-
-                        def toDelete = sorted.size() > MAX_BUILDS_TO_KEEP.toInteger()
-                            ? sorted.dropRight(MAX_BUILDS_TO_KEEP.toInteger())
-                            : []
-
-                        if (toDelete) {
-                            echo "🧹 Deleting ${toDelete.size()} old projects: ${toDelete*.key}"
-                            toDelete.each { prj ->
+                    if (minBuildToKeep > 0) {
+                        withCredentials([string(credentialsId: "${SONAR_CRED_ID}", variable: 'SONAR_TOKEN')]) {
+                            for (int i = 1; i <= minBuildToKeep; i++) {
+                                def oldProject = "${env.JOB_NAME}-${i}".replace('/', '-')
+                                echo "Deleting old Sonar project: ${oldProject}"
                                 sh """
-                                    curl -s -X POST "${SONAR_URL}/api/projects/delete" \\
-                                        -H "Authorization: Bearer \$SONAR_TOKEN" \\
-                                        -d "project=${prj.key}" || echo "⚠️ Failed to delete ${prj.key}"
+                                    curl -s -o /dev/null -u $SONAR_TOKEN: -X POST \
+                                    "${SONAR_URL}/api/projects/delete" \
+                                    -d "project=${oldProject}" || true
                                 """
                             }
-                        } else {
-                            echo "✅ No projects to delete. Latest ${MAX_BUILDS_TO_KEEP} retained."
                         }
                     }
                 }
