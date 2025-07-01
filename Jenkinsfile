@@ -27,7 +27,6 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 script {
-                    // unique key/name per build
                     def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replaceAll('/', '-')
                     withCredentials([string(credentialsId: SONAR_CRED_ID, variable: 'SONAR_TOKEN')]) {
                         sh """
@@ -110,42 +109,51 @@ pipeline {
             steps {
                 script {
                     withCredentials([string(credentialsId: SONAR_CRED_ID, variable: 'SONAR_TOKEN')]) {
-                        // 1) Fetch all projects, 2) filter by prefix, 3) sort by build number
                         def prefix = "${env.JOB_NAME}-".replaceAll('/', '-')
                         def raw = sh(
-                          script: """
-                            curl -f -s -X GET "${SONAR_URL}/api/projects/search?ps=500" \\
-                              -H "Authorization: Bearer \$SONAR_TOKEN"
-                          """,
-                          returnStdout: true
+                            script: """
+                                curl -s -X GET "${SONAR_URL}/api/projects/search?ps=500" \\
+                                -H "Authorization: Bearer \$SONAR_TOKEN"
+                            """,
+                            returnStdout: true
                         ).trim()
-                        echo "Raw Sonar projects JSON: ${raw}"
 
-                        def data = readJSON text: raw, failOnError: false
-                        if (!data?.components) {
-                            echo "⚠️ Could not fetch Sonar projects or got invalid JSON. Skipping cleanup."
+                        if (!raw || !raw.startsWith('{')) {
+                            echo "⚠️ SonarQube API did not return valid JSON. Skipping cleanup."
                             return
                         }
 
-                        // select only those with our prefix
+                        def data
+                        try {
+                            data = readJSON text: raw
+                        } catch (Exception e) {
+                            echo "⚠️ Failed to parse SonarQube API response: ${e.message}"
+                            return
+                        }
+
+                        if (!data?.components) {
+                            echo "⚠️ Could not find project list. Skipping cleanup."
+                            return
+                        }
+
                         def ours = data.components.findAll { it.key.startsWith(prefix) }
-                        // sort numerically by the suffix
                         def sorted = ours.sort { a, b ->
                             def aNum = (a.key - prefix) =~ /\d+/
                             def bNum = (b.key - prefix) =~ /\d+/
                             (aNum ? aNum[0].toInteger() : 0) <=> (bNum ? bNum[0].toInteger() : 0)
                         }
+
                         echo "Found ${sorted.size()} total builds in Sonar for this job."
 
-                        // drop the last MAX_BUILDS_TO_KEEP and delete the rest
                         def toDelete = sorted.size() > MAX_BUILDS_TO_KEEP.toInteger()
-                                       ? sorted.dropRight(MAX_BUILDS_TO_KEEP.toInteger())
-                                       : []
+                            ? sorted.dropRight(MAX_BUILDS_TO_KEEP.toInteger())
+                            : []
+
                         if (toDelete) {
                             toDelete.each { prj ->
                                 echo "Deleting Sonar project: ${prj.key}"
                                 sh """
-                                  curl -s -X POST "${SONAR_URL}/api/projects/delete" \\
+                                    curl -s -X POST "${SONAR_URL}/api/projects/delete" \\
                                     -H "Authorization: Bearer \$SONAR_TOKEN" \\
                                     -d "project=${prj.key}" || true
                                 """
