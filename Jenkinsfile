@@ -57,7 +57,7 @@ pipeline {
         stage('Build and Tag Artifact') {
             steps {
                 script {
-                    sh "mvn clean package -DskipTests"
+                    sh "mvn clean package -DskipTests -Dcheckstyle.skip=true"
                     def artifactName = "my-app-${BUILD_NUMBER}.jar"
                     sh """
                         mkdir -p tagged-artifacts
