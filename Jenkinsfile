@@ -6,10 +6,11 @@ pipeline {
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
         GIT_REPO_URL = 'https://github.com/yeshcrik/spring-petclinic.git'
         SONAR_URL = 'http://13.126.151.4:30000'
-        SONAR_CRED_ID = 'sonar-token'
+        SONAR_TOKEN = 'squ_07e73371bad50dd642ed679d52e250462a92eece'
+        SONAR_CRED_ID = 'sonar-userpass'
         MAX_BUILDS_TO_KEEP = 5
-        NEXUS_URL = 'http://13.126.151.4:30001/repository/maven-releases'
-        NEXUS_DOCKER_REPO = '13.126.151.4:30002'
+        NEXUS_URL = 'http://13.126.151.4:30001/#browse/browse:maven-releases'
+        NEXUS_DOCKER_REPO = '13.126.151.4:30002' // Updated to correct HTTP port
         NEXUS_CREDENTIAL_ID = 'nexus-creds'
     }
 
@@ -18,7 +19,6 @@ pipeline {
     }
 
     stages {
-
         stage('Checkout') {
             steps {
                 git url: "${GIT_REPO_URL}", branch: 'main'
@@ -29,20 +29,12 @@ pipeline {
             steps {
                 script {
                     def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replace('/', '-')
-                    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-                        def responseCode = sh(
-                            script: """
-                                curl -s -o /dev/null -w "%{http_code}" -X POST \
-                                "${SONAR_URL}/api/projects/create?project=${projectName}&name=${projectName}" \
-                                -H "Authorization: Bearer ${SONAR_TOKEN}"
-                            """,
-                            returnStdout: true
-                        ).trim()
-
-                        echo "SonarQube project creation response: ${responseCode}"
-                        if (responseCode != '200' && responseCode != '204') {
-                            error("Failed to create SonarQube project.")
-                        }
+                    withCredentials([string(credentialsId: 'sonar', variable: 'SONAR_TOKEN')]) {
+                        sh '''
+                        curl -s -o /dev/null -w %{http_code} \
+                          -X POST "$SONAR_URL/api/projects/create?project=petclinic_ci-8&name=petclinic_ci-8" \
+                          -H "Authorization: Bearer $SONAR_TOKEN"
+                        '''
                     }
                 }
             }
@@ -52,14 +44,12 @@ pipeline {
             steps {
                 script {
                     def projectName = "${env.JOB_NAME}-${env.BUILD_NUMBER}".replace('/', '-')
-                    withCredentials([string(credentialsId: 'sonar', variable: 'SONAR_TOKEN')]) {
-                        sh """
-                            mvn clean verify -Dcheckstyle.skip=true sonar:sonar \
-                              -Dsonar.projectKey=${projectName} \
-                              -Dsonar.host.url=${SONAR_URL} \
-                              -Dsonar.login=${SONAR_TOKEN}
-                        """
-                    }
+                    sh """
+                    mvn clean verify -Dcheckstyle.skip=true sonar:sonar \
+                      -Dsonar.projectKey=${projectName} \
+                      -Dsonar.host.url=${SONAR_URL} \
+                      -Dsonar.login=${SONAR_TOKEN}
+                    """
                 }
             }
         }
@@ -93,9 +83,9 @@ pipeline {
 
                     withCredentials([usernamePassword(credentialsId: "${NEXUS_CREDENTIAL_ID}", usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                         sh """
-                            curl -u $NEXUS_USER:$NEXUS_PASS \
-                                 --upload-file tagged-artifacts/${finalArtifact} \
-                                 ${NEXUS_URL}/${nexusPath}/${finalArtifact}
+                        curl -u $NEXUS_USER:$NEXUS_PASS \
+                             --upload-file tagged-artifacts/${finalArtifact} \
+                             ${NEXUS_URL}${nexusPath}/${finalArtifact}
                         """
                     }
                 }
@@ -129,37 +119,20 @@ pipeline {
         stage('Delete Old Sonar Projects') {
             steps {
                 script {
-                    def projectPrefix = "${env.JOB_NAME}-".replace('/', '-')
-                    withCredentials([usernamePassword(credentialsId: "${SONAR_CRED_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
-                        def json = sh(script: """
-                            curl -u $USERNAME:$PASSWORD -s '${SONAR_URL}/api/projects/search?q=${projectPrefix}'
-                        """, returnStdout: true).trim()
+                    def currentBuild = env.BUILD_NUMBER.toInteger()
+                    def minBuildToKeep = currentBuild - MAX_BUILDS_TO_KEEP.toInteger()
 
-                        if (!json || json == "{}") {
-                            echo "No JSON data received from SonarQube API."
-                            return
-                        }
-
-                        def projectKeys = readJSON text: json
-                        def matchedProjects = projectKeys.components.findAll {
-                            it.key.startsWith(projectPrefix)
-                        }.sort { a, b ->
-                            def aNum = a.key.replace(projectPrefix, '').toInteger()
-                            def bNum = b.key.replace(projectPrefix, '').toInteger()
-                            bNum <=> aNum
-                        }
-
-                        if (matchedProjects.size() > MAX_BUILDS_TO_KEEP.toInteger()) {
-                            def toDelete = matchedProjects.drop(MAX_BUILDS_TO_KEEP.toInteger())
-                            toDelete.each { proj ->
-                                echo "Deleting old Sonar project: ${proj.key}"
+                    if (minBuildToKeep > 0) {
+                        withCredentials([usernamePassword(credentialsId: "${SONAR_CRED_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                            for (int i = 1; i <= minBuildToKeep; i++) {
+                                def oldProject = "${env.JOB_NAME}-${i}".replace('/', '-')
+                                echo "Deleting old Sonar project: ${oldProject}"
                                 sh """
-                                    curl -u $USERNAME:$PASSWORD -X POST "${SONAR_URL}/api/projects/delete" \
-                                         -d "project=${proj.key}" || true
+                                curl -s -o /dev/null -w "%{http_code}" -u $USERNAME:$PASSWORD -X POST \
+                                  "${SONAR_URL}/api/projects/delete" \
+                                  -d "project=${oldProject}" || true
                                 """
                             }
-                        } else {
-                            echo "No old SonarQube projects to delete."
                         }
                     }
                 }
@@ -173,4 +146,3 @@ pipeline {
         }
     }
 }
-
