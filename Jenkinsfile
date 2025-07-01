@@ -4,13 +4,13 @@ pipeline {
     environment {
         JAVA_HOME = "/usr/lib/jvm/java-21-amazon-corretto.x86_64"
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
-        GIT_REPO_URL = 'https://github.com/jenkins-docs/simple-java-maven-app.git'
-        SONAR_URL = 'http://65.2.137.238:30900'
-        SONAR_TOKEN = 'sqa_654ca1dfc374dfbab096f5aa62d3238e39a54ba5'
+        GIT_REPO_URL = 'https://github.com/yeshcrik/spring-petclinic.git'
+        SONAR_URL = 'http://13.126.151.4:30000'
+        SONAR_TOKEN = 'http://13.126.151.4:30000/'
         SONAR_CRED_ID = 'sonar'
         MAX_BUILDS_TO_KEEP = 5
-        NEXUS_URL = 'http://65.2.137.238:30801/repository/sample-releases/'
-        NEXUS_DOCKER_REPO = '65.2.137.238:30002' // Updated to correct HTTP port
+        NEXUS_URL = 'http://13.126.151.4:30001/#browse/browse:maven-releases'
+        NEXUS_DOCKER_REPO = '13.126.151.4:30002' // Updated to correct HTTP port
         NEXUS_CREDENTIAL_ID = 'nexus-creds'
     }
 
@@ -21,7 +21,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git url: "${GIT_REPO_URL}", branch: 'master'
+                git url: "${GIT_REPO_URL}", branch: 'main'
             }
         }
 
