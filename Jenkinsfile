@@ -4,13 +4,13 @@ pipeline {
     environment {
         JAVA_HOME            = "/usr/lib/jvm/java-17-openjdk-amd64"
         PATH                 = "${JAVA_HOME}/bin:${env.PATH}"
-        GIT_REPO_URL         = 'https://github.com/yeshcrik/spring-petclinic.git'
-        SONAR_URL            = 'http://13.232.196.156:30000'
-        SONAR_CRED_ID        = 'sonar-token'
+        GIT_REPO_URL         = 'https://github.com/Nikesh0123/spring-petclinic.git'
+        SONAR_URL            = 'http://65.0.102.165:30007'
+        SONAR_CRED_ID        = 'SonarQube'
         MAX_BUILDS_TO_KEEP   = 5
-        NEXUS_URL            = 'http://13.126.151.4:30001/repository/maven-releases'
+        NEXUS_URL            = 'http://13.201.15.7:30001/repository/maven-releases'
         NEXUS_DOCKER_REPO    = '13.126.151.4:30002'
-        NEXUS_CREDENTIAL_ID  = 'nexus-creds'
+        NEXUS_CREDENTIAL_ID  = 'nexus-cred'
     }
 
     tools {
