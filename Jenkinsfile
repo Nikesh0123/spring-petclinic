@@ -5,7 +5,7 @@ pipeline {
         JAVA_HOME            = "/usr/lib/jvm/java-17-openjdk-amd64"
         PATH                 = "${JAVA_HOME}/bin:${env.PATH}"
         GIT_REPO_URL         = 'https://github.com/Nikesh0123/spring-petclinic.git'
-        SONAR_URL            = 'http://65.0.102.165:30007'
+        SONAR_URL            = 'http://65.0.132.44:30007'
         SONAR_CRED_ID        = 'SonarQube'
         MAX_BUILDS_TO_KEEP   = 5
         NEXUS_URL            = 'http://13.201.15.7:30001/repository/maven-releases'
